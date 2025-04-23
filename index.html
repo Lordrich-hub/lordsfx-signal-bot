@@ -27,14 +27,31 @@
       </select>
       <button class="btn btn-primary" onclick="checkSignal()">Check Market Signal</button>
     </div>
+
     <div id="signalBox" class="text-center"></div>
+
+    <div id="lotSizeCalculator" class="text-center mt-4" style="display:none;">
+      <h5>📏 Lot Size Calculator</h5>
+      <div class="mb-2">
+        <input type="number" id="accountSize" class="form-control w-50 mx-auto" placeholder="Account Size ($)">
+      </div>
+      <div class="mb-2">
+        <input type="number" id="riskPercent" class="form-control w-50 mx-auto" placeholder="Risk % per Trade">
+      </div>
+      <button class="btn btn-success" onclick="calculateLotSize()">Calculate Lot Size</button>
+      <p id="lotSizeResult" class="mt-3 fw-bold"></p>
+    </div>
   </div>
 
   <script>
+    let signalEntry = 0;
+    let signalSL = 0;
+    let selectedSymbol = "";
+
     async function checkSignal() {
       const selectedPair = document.getElementById("pairSelector").value;
-      const symbol = selectedPair;
-      const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=15min&outputsize=60&apikey=3d9c9f67fe414e5cb949cda6af723aef`;
+      selectedSymbol = selectedPair;
+      const url = `https://api.twelvedata.com/time_series?symbol=${selectedPair}&interval=15min&outputsize=60&apikey=3d9c9f67fe414e5cb949cda6af723aef`;
 
       try {
         const res = await fetch(url);
@@ -52,11 +69,15 @@
         const entry = parseFloat(data.values[0].close);
 
         let signalText = "❌ No Signal";
+        document.getElementById("lotSizeCalculator").style.display = 'none';
 
         if (latestEMA14 > latestEMA50 && latestRSI > 50) {
           const sl = entry - (entry * 0.01);
           const tp1 = entry + (entry * 0.01);
           const tp2 = entry + (entry * 0.014);
+
+          signalEntry = entry;
+          signalSL = sl;
 
           signalText = `
             <div class='card text-white p-4'>
@@ -65,12 +86,16 @@
               <p>🔴 SL: ${sl.toFixed(3)}</p>
               <p>💰 TP1: ${tp1.toFixed(3)}</p>
               <p>💰 TP2: ${tp2.toFixed(3)}</p>
-              <p>📊 Strategy: EMA14 > EMA50 & RSI > 50</p>
+              <p>🚀 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p>
             </div>`;
+          document.getElementById("lotSizeCalculator").style.display = 'block';
         } else if (latestEMA14 < latestEMA50 && latestRSI < 50) {
           const sl = entry + (entry * 0.01);
           const tp1 = entry - (entry * 0.01);
           const tp2 = entry - (entry * 0.014);
+
+          signalEntry = entry;
+          signalSL = sl;
 
           signalText = `
             <div class='card text-white p-4'>
@@ -79,14 +104,40 @@
               <p>🔴 SL: ${sl.toFixed(3)}</p>
               <p>💰 TP1: ${tp1.toFixed(3)}</p>
               <p>💰 TP2: ${tp2.toFixed(3)}</p>
-              <p>LordsFx Signal Provider | ⏳ Expires in 2 Hours | M15 Chart</p>
+              <p>🚀 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p>
             </div>`;
+          document.getElementById("lotSizeCalculator").style.display = 'block';
         }
 
         document.getElementById("signalBox").innerHTML = signalText;
       } catch (err) {
         document.getElementById("signalBox").innerHTML = `<div class='alert alert-danger'>Error loading signal: ${err.message}</div>`;
       }
+    }
+
+    function calculateLotSize() {
+      const accSize = parseFloat(document.getElementById("accountSize").value);
+      const riskPct = parseFloat(document.getElementById("riskPercent").value);
+
+      if (!accSize || !riskPct || signalEntry === 0 || signalSL === 0) {
+        document.getElementById("lotSizeResult").innerText = "❗ Please fill in all fields or check signal first.";
+        return;
+      }
+
+      const pair = selectedSymbol.toUpperCase();
+      const isJPY = pair.includes("JPY");
+      const pipSize = isJPY ? 0.01 : 0.0001;
+      const pipDistance = Math.abs(signalEntry - signalSL);
+      const slPips = pipDistance / pipSize;
+
+      const riskAmount = (accSize * riskPct) / 100;
+      const pipValuePerLot = 10;
+      const lotSize = riskAmount / (slPips * pipValuePerLot);
+
+      const resultText = `✅ <span class="text-success">Use Lot Size: ${lotSize.toFixed(2)}</span><br>
+        📏 SL Distance: ${slPips.toFixed(1)} pips`;
+
+      document.getElementById("lotSizeResult").innerHTML = resultText;
     }
 
     function EMA(prices, length) {
@@ -99,8 +150,7 @@
     }
 
     function RSI(closes, period = 14) {
-      const gains = [];
-      const losses = [];
+      const gains = [], losses = [];
       for (let i = 1; i <= period; i++) {
         const diff = closes[i] - closes[i - 1];
         if (diff >= 0) gains.push(diff);
@@ -122,22 +172,17 @@
       return rsiArray;
     }
   </script>
-  
+
+  <!-- 🔒 Disable inspect tools -->
   <script>
-    // Disable right-click context menu
     document.addEventListener('contextmenu', event => event.preventDefault());
-  
-    // Block DevTools shortcuts like Ctrl+Shift+I, F12, etc.
     document.onkeydown = function (e) {
       if (
         e.key === 'F12' ||
         (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
         (e.ctrlKey && e.key === 'U')
-      ) {
-        return false;
-      }
+      ) return false;
     };
   </script>
-  
 </body>
 </html>
