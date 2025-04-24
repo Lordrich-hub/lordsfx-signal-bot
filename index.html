@@ -42,7 +42,13 @@
       </select>
       <button class="btn btn-primary" onclick="checkSignal()">Check Market Signal</button>
     </div>
+
     <div id="signalBox" class="text-center"></div>
+
+    <div class="text-center mt-4" id="chartBox">
+      <h5 class="text-white">📊 Live Chart (TradingView)</h5>
+      <div id="tradingview_widget" class="mx-auto" style="height:400px;"></div>
+    </div>
   </div>
 
   <script>
@@ -206,10 +212,35 @@
         signalHTML += `</div>`;
 
         document.getElementById("signalBox").innerHTML = signalHTML;
+        loadTradingViewWidget(selectedPair);
       } catch (err) {
         document.getElementById("signalBox").innerHTML = `<div class='alert alert-danger'>Error loading signal: ${err.message}</div>`;
       }
     }
+
+    function loadTradingViewWidget(symbol) {
+      const mappedSymbol = symbol.replace("/", "");
+      const tvContainer = document.getElementById("tradingview_widget");
+      tvContainer.innerHTML = "";
+      new TradingView.widget({
+        width: "100%",
+        height: 400,
+        symbol: `FX:${mappedSymbol}`,
+        interval: "15",
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        toolbar_bg: "#111",
+        enable_publishing: false,
+        hide_side_toolbar: false,
+        allow_symbol_change: false,
+        container_id: "tradingview_widget"
+      });
+    }
   </script>
+
+  <!-- TradingView Widget Script -->
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </body>
 </html>
