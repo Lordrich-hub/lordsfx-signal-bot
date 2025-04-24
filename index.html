@@ -8,6 +8,7 @@
   <style>
     body { background-color: #111; color: white; }
     .card { background-color: #1e1e1e; }
+    .score-table td { padding: 0.25rem 0.5rem; border-bottom: 1px solid #444; }
   </style>
 </head>
 <body>
@@ -32,7 +33,6 @@
 
   <script>
     function SMA(values, length) {
-      if (values.length < length) return null;
       return values.slice(-length).reduce((a, b) => a + b, 0) / length;
     }
 
@@ -47,81 +47,19 @@
       return result;
     }
 
-    function RSI(values, period = 14) {
-      let gains = 0, losses = 0;
-      for (let i = 1; i <= period; i++) {
-        const change = values[i] - values[i - 1];
-        if (change > 0) gains += change;
-        else losses -= change;
-      }
-      let avgGain = gains / period;
-      let avgLoss = losses / period;
-      const rsi = [];
-      rsi.push(100 - (100 / (1 + avgGain / avgLoss)));
-      for (let i = period + 1; i < values.length; i++) {
-        const change = values[i] - values[i - 1];
-        const gain = change > 0 ? change : 0;
-        const loss = change < 0 ? -change : 0;
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        const rs = avgGain / avgLoss;
-        rsi.push(100 - (100 / (1 + rs)));
-      }
-      return rsi;
-    }
-
-    function MACD(values, fast = 12, slow = 26, signal = 9) {
-      const emaFast = EMA(values, fast);
-      const emaSlow = EMA(values, slow);
-      const macdLine = emaFast.map((val, i) => val - emaSlow[i]);
-      const signalLine = EMA(macdLine, signal);
-      const histogram = macdLine.map((val, i) => val - signalLine[i]);
-      return { macdLine, signalLine, histogram };
-    }
-
-    function Stochastic(highs, lows, closes, kPeriod = 9, dPeriod = 3) {
-      const stochK = [];
-      for (let i = 0; i <= closes.length - kPeriod; i++) {
-        const high = Math.max(...highs.slice(i, i + kPeriod));
-        const low = Math.min(...lows.slice(i, i + kPeriod));
-        const close = closes[i + kPeriod - 1];
-        stochK.push(((close - low) / (high - low)) * 100);
-      }
-      const stochD = EMA(stochK, dPeriod);
-      return { stochK, stochD };
-    }
-
-    function CCI(closes, highs, lows, period = 14) {
-      const tp = closes.map((c, i) => (c + highs[i] + lows[i]) / 3);
-      const sma = SMA(tp, period);
-      const md = tp.slice(-period).reduce((sum, val) => sum + Math.abs(val - sma), 0) / period;
-      return ((tp[tp.length - 1] - sma) / (0.015 * md));
-    }
-
-    function WilliamsR(closes, highs, lows, period = 14) {
-      const high = Math.max(...highs.slice(-period));
-      const low = Math.min(...lows.slice(-period));
-      const close = closes[closes.length - 1];
-      return ((high - close) / (high - low)) * -100;
-    }
-
-    function ATR(highs, lows, closes, period = 14) {
-      const trs = [];
-      for (let i = 1; i < highs.length; i++) {
-        const high = highs[i];
-        const low = lows[i];
-        const prevClose = closes[i - 1];
-        trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
-      }
-      return SMA(trs, period);
-    }
-
     function ADX(highs, lows, closes, period = 14) {
-      return 25; // Mock value for simplicity
-    }
-
-    function ROC(closes, period = 14) {
-      return ((closes[closes.length - 1] - closes[closes.length - 1 - period]) / closes[closes.length - 1 - period]) * 100;
+      const plusDI = [], minusDI = [], tr = [];
+      for (let i = 1; i < highs.length; i++) {
+        const upMove = highs[i] - highs[i - 1];
+        const downMove = lows[i - 1] - lows[i];
+        plusDI.push(upMove > downMove && upMove > 0 ? upMove : 0);
+        minusDI.push(downMove > upMove && downMove > 0 ? downMove : 0);
+        tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
+      }
+      const tr14 = SMA(tr.slice(-period), period);
+      const plusDI14 = (SMA(plusDI.slice(-period), period) / tr14) * 100;
+      const minusDI14 = (SMA(minusDI.slice(-period), period) / tr14) * 100;
+      return Math.abs((plusDI14 - minusDI14) / (plusDI14 + minusDI14)) * 100;
     }
 
     async function checkSignal() {
@@ -137,15 +75,93 @@
 
         const latestPrice = closes[closes.length - 1];
         let buys = 0, sells = 0;
+        const breakdown = [];
 
-        if (RSI(closes).slice(-1)[0] > 50) buys++; else sells++;
-        if (MACD(closes).histogram.slice(-1)[0] > 0) buys++; else sells++;
-        if (Stochastic(highs, lows, closes).stochK.slice(-1)[0] > 50) buys++; else sells++;
-        if (CCI(closes, highs, lows) > 0) buys++; else sells++;
-        if (WilliamsR(closes, highs, lows) > -50) buys++; else sells++;
-        if (ROC(closes) > 0) buys++; else sells++;
-        if (ATR(highs, lows, closes) > 0.001) buys++; else sells++;
-        if (ADX(highs, lows, closes) > 20) buys++; else sells++;
+        function RSI(values, period = 14) {
+          let gains = 0, losses = 0;
+          for (let i = 1; i <= period; i++) {
+            const change = values[i] - values[i - 1];
+            if (change > 0) gains += change;
+            else losses -= change;
+          }
+          let avgGain = gains / period;
+          let avgLoss = losses / period;
+          const rs = avgGain / avgLoss;
+          return 100 - (100 / (1 + rs));
+        }
+
+        function MACDHistogram(values, fast = 12, slow = 26, signal = 9) {
+          const fastEMA = EMA(values, fast);
+          const slowEMA = EMA(values, slow);
+          const macdLine = fastEMA.map((v, i) => v - slowEMA[i]);
+          const signalLine = EMA(macdLine, signal);
+          return macdLine[macdLine.length - 1] - signalLine[signalLine.length - 1];
+        }
+
+        function StochK(highs, lows, closes, period = 9) {
+          const high = Math.max(...highs.slice(-period));
+          const low = Math.min(...lows.slice(-period));
+          const close = closes[closes.length - 1];
+          return ((close - low) / (high - low)) * 100;
+        }
+
+        function CCI(closes, highs, lows, period = 14) {
+          const tp = closes.map((c, i) => (c + highs[i] + lows[i]) / 3);
+          const sma = SMA(tp, period);
+          const md = tp.slice(-period).reduce((sum, val) => sum + Math.abs(val - sma), 0) / period;
+          return ((tp[tp.length - 1] - sma) / (0.015 * md));
+        }
+
+        function WilliamsR(closes, highs, lows, period = 14) {
+          const high = Math.max(...highs.slice(-period));
+          const low = Math.min(...lows.slice(-period));
+          const close = closes[closes.length - 1];
+          return ((high - close) / (high - low)) * -100;
+        }
+
+        function ROC(closes, period = 14) {
+          return ((closes[closes.length - 1] - closes[closes.length - 1 - period]) / closes[closes.length - 1 - period]) * 100;
+        }
+
+        function ATR(highs, lows, closes, period = 14) {
+          const trs = [];
+          for (let i = 1; i < highs.length; i++) {
+            const high = highs[i];
+            const low = lows[i];
+            const prevClose = closes[i - 1];
+            trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+          }
+          return SMA(trs.slice(-period), period);
+        }
+
+        const maPeriods = [5, 10, 20, 50, 100, 200];
+        maPeriods.forEach(period => {
+          const sma = SMA(closes, period);
+          const ema = EMA(closes, period).slice(-1)[0];
+          const smaSignal = latestPrice > sma ? 'BUY' : 'SELL';
+          const emaSignal = latestPrice > ema ? 'BUY' : 'SELL';
+          if (smaSignal === 'BUY') buys++; else sells++;
+          if (emaSignal === 'BUY') buys++; else sells++;
+          breakdown.push(`<tr><td>SMA${period}</td><td>${sma.toFixed(5)}</td><td class='text-${smaSignal === 'BUY' ? 'success' : 'danger'}'>${smaSignal}</td></tr>`);
+          breakdown.push(`<tr><td>EMA${period}</td><td>${ema.toFixed(5)}</td><td class='text-${emaSignal === 'BUY' ? 'success' : 'danger'}'>${emaSignal}</td></tr>`);
+        });
+
+        const indicators = [
+          { name: "RSI", value: RSI(closes), logic: v => v > 50 },
+          { name: "MACD Histogram", value: MACDHistogram(closes), logic: v => v > 0 },
+          { name: "Stochastic %K", value: StochK(highs, lows, closes), logic: v => v > 50 },
+          { name: "CCI", value: CCI(closes, highs, lows), logic: v => v > 0 },
+          { name: "Williams %R", value: WilliamsR(closes, highs, lows), logic: v => v > -50 },
+          { name: "ROC", value: ROC(closes), logic: v => v > 0 },
+          { name: "ATR", value: ATR(highs, lows, closes), logic: v => v > 0.001 },
+          { name: "ADX", value: ADX(highs, lows, closes), logic: v => v > 20 }
+        ];
+
+        indicators.forEach(ind => {
+          const decision = ind.logic(ind.value) ? 'BUY' : 'SELL';
+          if (decision === 'BUY') buys++; else sells++;
+          breakdown.push(`<tr><td>${ind.name}</td><td>${ind.value.toFixed(2)}</td><td class='text-${decision === 'BUY' ? 'success' : 'danger'}'>${decision}</td></tr>`);
+        });
 
         const signal = buys > sells ? 'BUY' : sells > buys ? 'SELL' : 'NONE';
         let signalHTML = "<div class='card text-white p-4'>";
@@ -165,7 +181,11 @@
           signalHTML += `<p>No trade opportunity right now.</p>`;
         }
 
-        signalHTML += `<p>📊 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p></div>`;
+        signalHTML += `<p>📊 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p>`;
+        signalHTML += `<div class='mt-3'><h5>📋 Indicator Breakdown</h5><table class='table table-sm text-white score-table mx-auto'><thead><tr><th>Indicator</th><th>Value</th><th>Signal</th></tr></thead><tbody>${breakdown.join('')}</tbody></table></div>`;
+        signalHTML += `<p class='fw-bold mt-3'>📈 Total: ${buys} BUY / ${sells} SELL</p>`;
+        signalHTML += `</div>`;
+
         document.getElementById("signalBox").innerHTML = signalHTML;
       } catch (err) {
         document.getElementById("signalBox").innerHTML = `<div class='alert alert-danger'>Error loading signal: ${err.message}</div>`;
