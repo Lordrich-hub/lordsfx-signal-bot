@@ -27,162 +27,150 @@
       </select>
       <button class="btn btn-primary" onclick="checkSignal()">Check Market Signal</button>
     </div>
-
     <div id="signalBox" class="text-center"></div>
-
-    <div id="lotSizeCalculator" class="text-center mt-4" style="display:none;">
-      <h5>📏 Lot Size Calculator</h5>
-      <div class="mb-2">
-        <input type="number" id="accountSize" class="form-control w-50 mx-auto" placeholder="Account Size ($)">
-      </div>
-      <div class="mb-2">
-        <input type="number" id="riskPercent" class="form-control w-50 mx-auto" placeholder="Risk % per Trade">
-      </div>
-      <button class="btn btn-success" onclick="calculateLotSize()">Calculate Lot Size</button>
-      <p id="lotSizeResult" class="mt-3 fw-bold"></p>
-    </div>
   </div>
 
   <script>
-    let signalEntry = 0;
-    let signalSL = 0;
-    let selectedSymbol = "";
+    function SMA(values, length) {
+      if (values.length < length) return null;
+      return values.slice(-length).reduce((a, b) => a + b, 0) / length;
+    }
+
+    function EMA(values, length) {
+      const k = 2 / (length + 1);
+      let ema = values[0];
+      const result = [ema];
+      for (let i = 1; i < values.length; i++) {
+        ema = values[i] * k + ema * (1 - k);
+        result.push(ema);
+      }
+      return result;
+    }
+
+    function RSI(values, period = 14) {
+      let gains = 0, losses = 0;
+      for (let i = 1; i <= period; i++) {
+        const change = values[i] - values[i - 1];
+        if (change > 0) gains += change;
+        else losses -= change;
+      }
+      let avgGain = gains / period;
+      let avgLoss = losses / period;
+      const rsi = [];
+      rsi.push(100 - (100 / (1 + avgGain / avgLoss)));
+      for (let i = period + 1; i < values.length; i++) {
+        const change = values[i] - values[i - 1];
+        const gain = change > 0 ? change : 0;
+        const loss = change < 0 ? -change : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        const rs = avgGain / avgLoss;
+        rsi.push(100 - (100 / (1 + rs)));
+      }
+      return rsi;
+    }
+
+    function MACD(values, fast = 12, slow = 26, signal = 9) {
+      const emaFast = EMA(values, fast);
+      const emaSlow = EMA(values, slow);
+      const macdLine = emaFast.map((val, i) => val - emaSlow[i]);
+      const signalLine = EMA(macdLine, signal);
+      const histogram = macdLine.map((val, i) => val - signalLine[i]);
+      return { macdLine, signalLine, histogram };
+    }
+
+    function Stochastic(highs, lows, closes, kPeriod = 9, dPeriod = 3) {
+      const stochK = [];
+      for (let i = 0; i <= closes.length - kPeriod; i++) {
+        const high = Math.max(...highs.slice(i, i + kPeriod));
+        const low = Math.min(...lows.slice(i, i + kPeriod));
+        const close = closes[i + kPeriod - 1];
+        stochK.push(((close - low) / (high - low)) * 100);
+      }
+      const stochD = EMA(stochK, dPeriod);
+      return { stochK, stochD };
+    }
+
+    function CCI(closes, highs, lows, period = 14) {
+      const tp = closes.map((c, i) => (c + highs[i] + lows[i]) / 3);
+      const sma = SMA(tp, period);
+      const md = tp.slice(-period).reduce((sum, val) => sum + Math.abs(val - sma), 0) / period;
+      return ((tp[tp.length - 1] - sma) / (0.015 * md));
+    }
+
+    function WilliamsR(closes, highs, lows, period = 14) {
+      const high = Math.max(...highs.slice(-period));
+      const low = Math.min(...lows.slice(-period));
+      const close = closes[closes.length - 1];
+      return ((high - close) / (high - low)) * -100;
+    }
+
+    function ATR(highs, lows, closes, period = 14) {
+      const trs = [];
+      for (let i = 1; i < highs.length; i++) {
+        const high = highs[i];
+        const low = lows[i];
+        const prevClose = closes[i - 1];
+        trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
+      }
+      return SMA(trs, period);
+    }
+
+    function ADX(highs, lows, closes, period = 14) {
+      return 25; // Mock value for simplicity
+    }
+
+    function ROC(closes, period = 14) {
+      return ((closes[closes.length - 1] - closes[closes.length - 1 - period]) / closes[closes.length - 1 - period]) * 100;
+    }
 
     async function checkSignal() {
       const selectedPair = document.getElementById("pairSelector").value;
-      selectedSymbol = selectedPair;
-      const url = `https://api.twelvedata.com/time_series?symbol=${selectedPair}&interval=15min&outputsize=60&apikey=3d9c9f67fe414e5cb949cda6af723aef`;
+      const url = `https://api.twelvedata.com/time_series?symbol=${selectedPair}&interval=15min&outputsize=100&apikey=3d9c9f67fe414e5cb949cda6af723aef`;
 
       try {
         const res = await fetch(url);
         const data = await res.json();
-        if (!data.values) throw new Error(data.message || "Invalid data or API limit");
+        const closes = data.values.map(x => parseFloat(x.close)).reverse();
+        const highs = data.values.map(x => parseFloat(x.high)).reverse();
+        const lows = data.values.map(x => parseFloat(x.low)).reverse();
 
-        const prices = data.values.map(d => parseFloat(d.close)).reverse();
-        const ema14 = EMA(prices, 14);
-        const ema50 = EMA(prices, 50);
-        const rsi = RSI(prices, 14);
+        const latestPrice = closes[closes.length - 1];
+        let buys = 0, sells = 0;
 
-        const latestEMA14 = ema14[ema14.length - 1];
-        const latestEMA50 = ema50[ema50.length - 1];
-        const latestRSI = rsi[rsi.length - 1];
-        const entry = parseFloat(data.values[0].close);
+        if (RSI(closes).slice(-1)[0] > 50) buys++; else sells++;
+        if (MACD(closes).histogram.slice(-1)[0] > 0) buys++; else sells++;
+        if (Stochastic(highs, lows, closes).stochK.slice(-1)[0] > 50) buys++; else sells++;
+        if (CCI(closes, highs, lows) > 0) buys++; else sells++;
+        if (WilliamsR(closes, highs, lows) > -50) buys++; else sells++;
+        if (ROC(closes) > 0) buys++; else sells++;
+        if (ATR(highs, lows, closes) > 0.001) buys++; else sells++;
+        if (ADX(highs, lows, closes) > 20) buys++; else sells++;
 
-        let signalText = "❌ No Signal";
-        document.getElementById("lotSizeCalculator").style.display = 'none';
+        const signal = buys > sells ? 'BUY' : sells > buys ? 'SELL' : 'NONE';
+        let signalHTML = "<div class='card text-white p-4'>";
+        signalHTML += `<h3>♾ ${selectedPair} ${signal === 'BUY' ? 'BUY' : signal === 'SELL' ? 'SELL' : 'NO'} SIGNAL</h3>`;
 
-        if (latestEMA14 > latestEMA50 && latestRSI > 50) {
-          const sl = entry - (entry * 0.01);
-          const tp1 = entry + (entry * 0.01);
-          const tp2 = entry + (entry * 0.014);
-
-          signalEntry = entry;
-          signalSL = sl;
-
-          signalText = `
-            <div class='card text-white p-4'>
-              <h3>♾ ${selectedPair} BUY SIGNAL</h3>
-              <p>📍 Entry: ${entry.toFixed(3)}</p>
-              <p>🔴 SL: ${sl.toFixed(3)}</p>
-              <p>💰 TP1: ${tp1.toFixed(3)}</p>
-              <p>💰 TP2: ${tp2.toFixed(3)}</p>
-              <p>🚀 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p>
-            </div>`;
-          document.getElementById("lotSizeCalculator").style.display = 'block';
-        } else if (latestEMA14 < latestEMA50 && latestRSI < 50) {
-          const sl = entry + (entry * 0.01);
-          const tp1 = entry - (entry * 0.01);
-          const tp2 = entry - (entry * 0.014);
-
-          signalEntry = entry;
-          signalSL = sl;
-
-          signalText = `
-            <div class='card text-white p-4'>
-              <h3>♾ ${selectedPair} SELL SIGNAL</h3>
-              <p>📍 Entry: ${entry.toFixed(3)}</p>
-              <p>🔴 SL: ${sl.toFixed(3)}</p>
-              <p>💰 TP1: ${tp1.toFixed(3)}</p>
-              <p>💰 TP2: ${tp2.toFixed(3)}</p>
-              <p>🚀 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p>
-            </div>`;
-          document.getElementById("lotSizeCalculator").style.display = 'block';
+        if (signal === 'BUY') {
+          signalHTML += `<p>📍 Entry: ${latestPrice.toFixed(3)}</p>
+            <p>🔴 SL: ${(latestPrice * 0.99).toFixed(3)}</p>
+            <p>💰 TP1: ${(latestPrice * 1.01).toFixed(3)}</p>
+            <p>💰 TP2: ${(latestPrice * 1.014).toFixed(3)}</p>`;
+        } else if (signal === 'SELL') {
+          signalHTML += `<p>📍 Entry: ${latestPrice.toFixed(3)}</p>
+            <p>🔴 SL: ${(latestPrice * 1.01).toFixed(3)}</p>
+            <p>💰 TP1: ${(latestPrice * 0.99).toFixed(3)}</p>
+            <p>💰 TP2: ${(latestPrice * 0.986).toFixed(3)}</p>`;
+        } else {
+          signalHTML += `<p>No trade opportunity right now.</p>`;
         }
 
-        document.getElementById("signalBox").innerHTML = signalText;
+        signalHTML += `<p>📊 LordsFx Signal | ⏳ Expires in 2 Hours | M15 Chart</p></div>`;
+        document.getElementById("signalBox").innerHTML = signalHTML;
       } catch (err) {
         document.getElementById("signalBox").innerHTML = `<div class='alert alert-danger'>Error loading signal: ${err.message}</div>`;
       }
     }
-
-    function calculateLotSize() {
-      const accSize = parseFloat(document.getElementById("accountSize").value);
-      const riskPct = parseFloat(document.getElementById("riskPercent").value);
-
-      if (!accSize || !riskPct || signalEntry === 0 || signalSL === 0) {
-        document.getElementById("lotSizeResult").innerText = "❗ Please fill in all fields or check signal first.";
-        return;
-      }
-
-      const pair = selectedSymbol.toUpperCase();
-      const isJPY = pair.includes("JPY");
-      const pipSize = isJPY ? 0.01 : 0.0001;
-      const pipDistance = Math.abs(signalEntry - signalSL);
-      const slPips = pipDistance / pipSize;
-
-      const riskAmount = (accSize * riskPct) / 100;
-      const pipValuePerLot = 10;
-      const lotSize = riskAmount / (slPips * pipValuePerLot);
-
-      const resultText = `✅ <span class="text-success">Use Lot Size: ${lotSize.toFixed(2)}</span><br>
-        📏 SL Distance: ${slPips.toFixed(1)} pips`;
-
-      document.getElementById("lotSizeResult").innerHTML = resultText;
-    }
-
-    function EMA(prices, length) {
-      const k = 2 / (length + 1);
-      const emaArray = [prices[0]];
-      for (let i = 1; i < prices.length; i++) {
-        emaArray.push(prices[i] * k + emaArray[i - 1] * (1 - k));
-      }
-      return emaArray;
-    }
-
-    function RSI(closes, period = 14) {
-      const gains = [], losses = [];
-      for (let i = 1; i <= period; i++) {
-        const diff = closes[i] - closes[i - 1];
-        if (diff >= 0) gains.push(diff);
-        else losses.push(Math.abs(diff));
-      }
-      let avgGain = gains.reduce((a, b) => a + b, 0) / period;
-      let avgLoss = losses.reduce((a, b) => a + b, 0) / period;
-      const rs = avgGain / avgLoss;
-      const rsiArray = [100 - 100 / (1 + rs)];
-      for (let i = period + 1; i < closes.length; i++) {
-        const change = closes[i] - closes[i - 1];
-        const gain = change > 0 ? change : 0;
-        const loss = change < 0 ? Math.abs(change) : 0;
-        avgGain = (avgGain * (period - 1) + gain) / period;
-        avgLoss = (avgLoss * (period - 1) + loss) / period;
-        const newRS = avgGain / avgLoss;
-        rsiArray.push(100 - 100 / (1 + newRS));
-      }
-      return rsiArray;
-    }
-  </script>
-
-  <!-- 🔒 Disable inspect tools -->
-  <script>
-    document.addEventListener('contextmenu', event => event.preventDefault());
-    document.onkeydown = function (e) {
-      if (
-        e.key === 'F12' ||
-        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) ||
-        (e.ctrlKey && e.key === 'U')
-      ) return false;
-    };
   </script>
 </body>
 </html>
